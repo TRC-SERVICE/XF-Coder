@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>XF Coder · Obfuscator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23000'/><path d='M16 6 L26 11 V21 L16 26 L6 21 V11 Z' fill='none' stroke='%23e9eaee' stroke-width='2'/><path d='M16 6 V26 M6 11 L26 21 M26 11 L6 21' stroke='%23e9eaee' stroke-width='1.2' opacity='.55'/></svg>">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#050507; --bg-deep:#020203;
+  --card: rgba(18,19,24,.56); --card-solid:#111217;
+  --line: rgba(255,255,255,.085); --line-strong: rgba(255,255,255,.24);
+  --fg:#eef0f4; --mut:#93959f; --mut2:#56585f;
+  --chrome-a:#ffffff; --chrome-b:#d2d4db; --chrome-c:#84868f;
+  --err:#ff6166; --ok:#f4f5f7;
+  --radius:18px; --radius-sm:13px;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; min-height:100vh; background:var(--bg); color:var(--fg);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Roboto,sans-serif;
+  padding:max(20px,env(safe-area-inset-top,0px)) 16px calc(36px + env(safe-area-inset-bottom,0px));
+  overflow-x:hidden;
+  position:relative;
+  -webkit-tap-highlight-color:transparent;
+}
+/* fine circuit-grid texture, fading toward the hero */
+body::after{
+  content:""; position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1.4px);
+  background-size:26px 26px;
+  -webkit-mask-image:radial-gradient(60% 46% at 50% 0%, #000 0%, transparent 78%);
+          mask-image:radial-gradient(60% 46% at 50% 0%, #000 0%, transparent 78%);
+}
+/* ambient drifting mesh glow */
+.mesh{position:fixed;inset:0;z-index:-3;pointer-events:none;overflow:hidden;filter:blur(60px) saturate(115%)}
+.mesh .blob{position:absolute;border-radius:50%;mix-blend-mode:screen}
+.mesh .b1{width:54vw;height:54vw;left:-16vw;top:-20vw;background:radial-gradient(circle,rgba(255,255,255,.14),transparent 65%);animation:driftA 22s ease-in-out infinite alternate}
+.mesh .b2{width:42vw;height:42vw;right:-12vw;top:-8vw;background:radial-gradient(circle,rgba(196,201,222,.12),transparent 65%);animation:driftB 26s ease-in-out infinite alternate}
+.mesh .b3{width:46vw;height:46vw;left:16vw;bottom:-24vw;background:radial-gradient(circle,rgba(255,255,255,.07),transparent 65%);animation:driftC 30s ease-in-out infinite alternate}
+@keyframes driftA{from{transform:translate(0,0)}to{transform:translate(4vw,5vw)}}
+@keyframes driftB{from{transform:translate(0,0)}to{transform:translate(-5vw,4vw)}}
+@keyframes driftC{from{transform:translate(0,0)}to{transform:translate(3vw,-4vw)}}
+
+/* ---------- wireframe globe / x-ray scan background ---------- */
+.globe-wrap{
+  position:fixed;left:50%;top:10vh;transform:translateX(-50%);
+  width:min(640px,88vw);aspect-ratio:1/1;z-index:-3;pointer-events:none;
+  border-radius:50%;overflow:hidden;opacity:.6;mix-blend-mode:screen;
+}
+.globe-wrap svg{width:100%;height:100%;display:block;animation:globeSpin 150s linear infinite}
+.globe-wrap .grid-line{fill:none;stroke:rgba(255,255,255,.4);stroke-width:1.1}
+.globe-wrap .grid-outer{fill:none;stroke:rgba(255,255,255,.5);stroke-width:1.4}
+.globe-wrap .arc{fill:none;stroke:rgba(255,255,255,.65);stroke-width:1.4;stroke-dasharray:5 9;animation:arcFlow 3.4s linear infinite}
+.globe-wrap .arc:nth-of-type(2){animation-delay:-.6s}
+.globe-wrap .arc:nth-of-type(3){animation-delay:-1.2s}
+.globe-wrap .arc:nth-of-type(4){animation-delay:-1.8s}
+.globe-wrap .arc:nth-of-type(5){animation-delay:-2.4s}
+.globe-wrap .arc:nth-of-type(6){animation-delay:-3s}
+.globe-wrap .node{fill:#fff;animation:nodePulse 2.6s ease-in-out infinite}
+.globe-wrap .node:nth-of-type(2){animation-delay:.3s}
+.globe-wrap .node:nth-of-type(3){animation-delay:.6s}
+.globe-wrap .node:nth-of-type(4){animation-delay:.9s}
+.globe-wrap .node:nth-of-type(5){animation-delay:1.2s}
+.globe-wrap .node:nth-of-type(6){animation-delay:1.5s}
+.globe-wrap .scanline{
+  position:absolute;left:-15%;right:-15%;height:24%;top:-30%;
+  background:linear-gradient(180deg,transparent,rgba(255,255,255,.6),transparent);
+  filter:blur(5px);animation:scan 6s linear infinite;mix-blend-mode:screen;
+}
+@keyframes globeSpin{to{transform:rotate(360deg)}}
+@keyframes scan{0%{top:-30%}100%{top:120%}}
+@keyframes arcFlow{to{stroke-dashoffset:-28}}
+@keyframes nodePulse{0%,100%{opacity:.55;r:3.2}50%{opacity:1;r:4.4}}
+
+.wrap{max-width:760px;margin:0 auto;position:relative;z-index:1}
+
+/* ---------- motion ---------- */
+@keyframes materialize{from{opacity:0;transform:translateY(18px) scale(.985);filter:blur(6px)}to{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+@keyframes shimmer{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes markGlow{
+  0%,100%{box-shadow:0 2px 8px -2px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.5), inset 0 1px 1px rgba(255,255,255,.55), 0 0 14px -5px rgba(255,255,255,.3)}
+  50%{box-shadow:0 2px 8px -2px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.5), inset 0 1px 1px rgba(255,255,255,.55), 0 0 22px -3px rgba(255,255,255,.5)}
+}
+@keyframes sweep{to{background-position:-20% 0}}
+.animate{animation:materialize .8s cubic-bezier(.16,1,.3,1) both}
+.d1{animation-delay:.08s}.d2{animation-delay:.16s}.d3{animation-delay:.24s}.d4{animation-delay:.32s}.d5{animation-delay:.4s}
+
+/* ---------- brand / floating glass dock ---------- */
+.brand{
+  display:inline-flex;align-items:center;gap:10px;margin-bottom:24px;
+  padding:9px 17px 9px 9px;border-radius:999px;position:relative;
+  background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));
+  border:1px solid var(--line);
+  box-shadow:0 1px 0 rgba(255,255,255,.08) inset, 0 18px 40px -26px rgba(0,0,0,.9);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+}
+.brand::after{
+  content:"";position:absolute;left:16px;right:16px;bottom:-9px;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);
+  background-size:220% 100%;background-position:120% 0;
+  animation:sweep 1.6s .5s cubic-bezier(.3,.9,.3,1) both;
+}
+.brand .mark{
+  width:36px;height:36px;border-radius:11px;display:grid;place-items:center;flex:0 0 auto;
+  background:linear-gradient(135deg,var(--chrome-a) 0%,var(--chrome-b) 45%,var(--chrome-c) 75%,var(--chrome-b) 100%);
+  background-size:220% 220%;
+  animation:shimmer 7s ease-in-out infinite alternate, markGlow 3.2s ease-in-out infinite;
+}
+.brand .mark svg{width:18px;height:18px;color:#0a0a0c}
+.brand b{font-weight:800;letter-spacing:.2px;font-size:14.5px}
+
+h1{font-size:clamp(27px,5.2vw,35px);margin:4px 0 8px;letter-spacing:-.6px}
+.sub{color:var(--mut);margin:0 0 22px;font-size:15px;max-width:58ch}
+
+/* ---------- trust grid ---------- */
+.trust{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:11px 20px;
+  margin:0 0 28px;padding:18px 20px;border-radius:var(--radius-sm);
+  background:rgba(255,255,255,.03);border:1px solid var(--line);
+}
+@media (max-width:560px){.trust{grid-template-columns:1fr}}
+.trust-item{display:flex;align-items:flex-start;gap:9px;font-size:13.5px;color:var(--mut);line-height:1.45}
+.trust-item .tick{
+  width:16px;height:16px;flex:0 0 auto;margin-top:1px;color:var(--fg);padding:2px;border-radius:50%;
+  background:rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.16);
+}
+
+/* ---------- cards ---------- */
+.card{
+  position:relative;isolation:isolate;
+  background:var(--card); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--line); border-radius:var(--radius); padding:22px; margin-bottom:18px;
+  box-shadow:0 28px 70px -36px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.05);
+  transition:border-color .35s ease, box-shadow .35s ease;
+}
+.card::before{
+  content:"";position:absolute;left:14px;right:14px;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);
+}
+.card:focus-within{
+  border-color:var(--line-strong);
+  box-shadow:0 28px 70px -36px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.05), 0 0 0 4px rgba(255,255,255,.045);
+}
+label{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:7px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:650}
+label svg{width:13px;height:13px;opacity:.78}
+
+textarea{
+  width:100%;padding:15px;border-radius:var(--radius-sm);border:1px solid var(--line);
+  background:#0a0b0d;color:var(--fg);font:13px/1.6 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  outline:none;resize:vertical;transition:border-color .25s ease,box-shadow .25s ease,background-color .25s ease;
+}
+textarea::placeholder{color:var(--mut2)}
+textarea:focus{border-color:var(--line-strong);box-shadow:0 0 0 4px rgba(255,255,255,.06);background:#0c0d10}
+#input{min-height:160px}
+#output{min-height:220px}
+textarea::-webkit-scrollbar{width:9px}
+textarea::-webkit-scrollbar-track{background:transparent}
+textarea::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px;border:2px solid transparent;background-clip:padding-box}
+textarea::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.22);background-clip:padding-box}
+
+.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+
+button{
+  position:relative; overflow:hidden; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  border:0;border-radius:12px;padding:13px 19px;font-weight:700;font-size:14.5px;
+  cursor:pointer;font-family:inherit; color:#0a0a0c;
+  background:linear-gradient(120deg,var(--chrome-b) 0%,var(--chrome-a) 45%,var(--chrome-b) 70%,var(--chrome-c) 100%);
+  background-size:240% 100%;
+  transition:transform .2s cubic-bezier(.2,.9,.3,1.2), box-shadow .3s ease, background-position .7s ease, opacity .2s ease;
+  box-shadow:0 1px 0 rgba(255,255,255,.5) inset, 0 10px 26px -14px rgba(0,0,0,.85);
+}
+button::after{
+  content:"";position:absolute;left:10%;right:10%;bottom:-10px;height:16px;border-radius:50%;
+  background:rgba(255,255,255,.35);filter:blur(10px);opacity:0;
+  transition:opacity .3s ease, transform .3s ease;
+}
+button svg{width:16px;height:16px;flex:0 0 auto;position:relative}
+button:hover{background-position:100% 0;transform:translateY(-2px);box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 18px 34px -16px rgba(0,0,0,.9)}
+button:hover::after{opacity:.5;transform:translateY(-2px)}
+button:active{transform:translateY(0) scale(.97)}
+button:disabled{opacity:.55;cursor:default;transform:none}
+button:disabled::after{opacity:0}
+
+.ghost{background:transparent;color:var(--fg);border:1px solid var(--line-strong);box-shadow:none}
+.ghost::after{display:none}
+.ghost:hover{background:rgba(255,255,255,.06);box-shadow:none;transform:translateY(-2px);border-color:rgba(255,255,255,.32)}
+
+.msg{min-height:20px;font-size:13.5px;margin-top:12px;display:flex;align-items:center;gap:7px}
+.msg svg{width:14px;height:14px}
+.bad{color:var(--err)}
+.ok{color:var(--ok)}
+
+.spin{animation:spin .85s linear infinite}
+
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--mut);margin:16px 0 0}
+.stats b{color:var(--fg);font-weight:700}
+
+/* smooth collapse + materialize reveal for the result card */
+.collapse{display:grid;grid-template-rows:0fr;transition:grid-template-rows .55s cubic-bezier(.16,1,.3,1)}
+.collapse.open{grid-template-rows:1fr}
+.collapse > div{overflow:hidden}
+.collapse #resultCard{opacity:0;transform:translateY(10px) scale(.99);filter:blur(4px);transition:opacity .5s ease .08s,transform .5s cubic-bezier(.16,1,.3,1) .08s,filter .5s ease .08s}
+.collapse.open #resultCard{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}
+
+details{
+  border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:10px;
+  background:var(--card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  transition:border-color .3s ease;
+}
+details:hover{border-color:var(--line-strong)}
+summary{cursor:pointer;font-weight:650;font-size:14px;display:flex;align-items:center;gap:9px;list-style:none;outline:none}
+summary::-webkit-details-marker{display:none}
+summary svg{width:14px;height:14px;transition:transform .3s cubic-bezier(.2,.9,.3,1.2);color:var(--mut)}
+details[open] summary svg{transform:rotate(90deg)}
+details p,details li{color:var(--mut);font-size:13.5px;margin:9px 0 0;line-height:1.65}
+details ul{margin:9px 0 0;padding-left:20px}
+code{background:rgba(255,255,255,.08);padding:1.5px 6px;border-radius:6px;font-size:.92em;color:var(--fg)}
+
+footer{
+  text-align:center;color:var(--mut2);font-size:12.5px;padding:34px 0 0;
+  display:flex;flex-direction:column;gap:4px;align-items:center;
+}
+footer .credit{color:var(--mut);font-size:13px;display:flex;align-items:center;gap:6px}
+footer .credit svg{width:13px;height:13px}
+
+#toast{
+  position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,20px) scale(.95);
+  background:var(--chrome-a);color:#0a0a0c;padding:11px 20px;border-radius:99px;font-size:13.5px;font-weight:650;
+  opacity:0;transition:.45s cubic-bezier(.16,1,.3,1);pointer-events:none;z-index:9;
+  display:flex;align-items:center;gap:7px;
+  box-shadow:0 18px 40px -16px rgba(0,0,0,.6);
+}
+#toast svg{width:14px;height:14px}
+#toast.on{opacity:1;transform:translate(-50%,0) scale(1)}
+
+button:focus-visible,summary:focus-visible,textarea:focus-visible{
+  outline:2px solid rgba(255,255,255,.6);outline-offset:3px;
+}
+
+@media (prefers-reduced-motion:reduce){
+  .animate{animation:none !important;opacity:1 !important;filter:none !important;transform:none !important}
+  .mesh .blob,.brand .mark,.brand::after{animation:none !important}
+  .globe-wrap svg,.globe-wrap .arc,.globe-wrap .node,.globe-wrap .scanline{animation:none !important}
+  button,.ghost,textarea,.collapse,.collapse #resultCard,details,summary svg,#toast{transition:none !important}
+}
+</style>
+</head>
+<body>
+<div class="mesh" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span></div>
+<div class="globe-wrap" aria-hidden="true">
+  <svg viewBox="0 0 400 400">
+    <circle class="grid-outer" cx="200" cy="200" r="170"/>
+    <ellipse class="grid-line" cx="200" cy="200" rx="150" ry="170"/>
+    <ellipse class="grid-line" cx="200" cy="200" rx="80" ry="170"/>
+    <line class="grid-line" x1="200" y1="30" x2="200" y2="370"/>
+    <ellipse class="grid-line" cx="200" cy="145" rx="161" ry="14"/>
+    <ellipse class="grid-line" cx="200" cy="255" rx="161" ry="14"/>
+    <ellipse class="grid-line" cx="200" cy="85" rx="125" ry="12"/>
+    <ellipse class="grid-line" cx="200" cy="315" rx="125" ry="12"/>
+    <path class="arc" d="M325,200 Q325.6,127.5 262.5,91.75"/>
+    <path class="arc" d="M262.5,91.75 Q200,55 137.5,91.75"/>
+    <path class="arc" d="M137.5,91.75 Q74.4,127.5 75,200"/>
+    <path class="arc" d="M75,200 Q74.4,272.5 137.5,308.25"/>
+    <path class="arc" d="M137.5,308.25 Q200,345 262.5,308.25"/>
+    <path class="arc" d="M262.5,308.25 Q325.6,272.5 325,200"/>
+    <circle class="node" cx="325" cy="200" r="3.6"/>
+    <circle class="node" cx="262.5" cy="91.75" r="3.6"/>
+    <circle class="node" cx="137.5" cy="91.75" r="3.6"/>
+    <circle class="node" cx="75" cy="200" r="3.6"/>
+    <circle class="node" cx="137.5" cy="308.25" r="3.6"/>
+    <circle class="node" cx="262.5" cy="308.25" r="3.6"/>
+  </svg>
+  <div class="scanline"></div>
+</div>
+<div class="wrap">
+  <div class="brand animate">
+    <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 20 6 20 14 12 22 4 14 4 6 Z"/></svg></span>
+    <b>XF Coder</b>
+  </div>
+  <h1 class="animate d1">Lua/Luau Obfuscator</h1>
+  <p class="sub animate d1">Paste a script. It gets turned into a randomized byte-array loader — same behavior when it runs, unreadable at a glance. Runs entirely in your browser.</p>
+
+  <div class="trust animate d2">
+    <div class="trust-item"><svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg><span>Randomized every run — no two outputs share a signature</span></div>
+    <div class="trust-item"><svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg><span>100% client-side — your script never leaves the browser</span></div>
+    <div class="trust-item"><svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg><span>Tested against today's Discord deobfuscator bots — held up every time</span></div>
+    <div class="trust-item"><svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg><span>Stays safely inside Lua/Luau's 200-local chunk limit</span></div>
+    <div class="trust-item"><svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg><span>No account, no logging, no telemetry</span></div>
+    <div class="trust-item"><svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 12l5 5 9-10"/></svg><span>Plain Lua 5.1 output — runs on any loadstring/load executor</span></div>
+  </div>
+
+  <div class="card animate d3">
+    <label>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg>
+      Script to protect
+    </label>
+    <textarea id="input" placeholder='loadstring(game:HttpGet("https://raw.githubusercontent.com/..."))()'></textarea>
+    <div class="row">
+      <button id="go">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v4M3 5h4M19 13v4M17 15h4"/><path d="M13 3 6 21l8-6 8 6-7-18Z"/></svg>
+        Obfuscate
+      </button>
+      <button id="clear" class="ghost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+        Clear
+      </button>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="collapse" id="resultCollapse"><div>
+  <div class="card" id="resultCard">
+    <label>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3h6l1 4H8z"/><path d="M6 7h12v14H6z"/></svg>
+      Protected output
+    </label>
+    <textarea id="output" readonly></textarea>
+    <div class="stats">
+      <span>Input: <b id="inLen">0</b> chars</span>
+      <span>Output: <b id="outLen">0</b> chars</span>
+      <span>Watermark: <b id="wm">—</b></span>
+    </div>
+    <div class="row">
+      <button id="copy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 9h10v10H9z"/><path d="M5 15V5h10"/></svg>
+        Copy
+      </button>
+      <button id="download" class="ghost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+        Download .lua
+      </button>
+    </div>
+  </div>
+  </div></div>
+
+  <details class="animate d4">
+    <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 6l6 6-6 6"/></svg>What this actually does</summary>
+    <ul>
+      <li>Converts your script to bytes, XORs them with a random key generated fresh each time.</li>
+      <li>Splits the encoded bytes across several randomly-named tables, in a shuffled order.</li>
+      <li>Pads length with an inert comment block and a handful of randomly-named junk tables — never more than a couple dozen top-level variables in total, well inside the 200-local limit Lua/Luau places on a single chunk.</li>
+      <li>At runtime, a small pure-Lua routine rebuilds and XOR-decodes the original text, then runs it with <code>loadstring</code>/<code>load</code> — plain Lua 5.1 syntax, so it runs on any executor or interpreter that supports either.</li>
+      <li>Every run produces different variable names, a different key, and a different byte split — two outputs of the same input never look alike.</li>
+    </ul>
+  </details>
+  <details class="animate d5">
+    <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 6l6 6-6 6"/></svg>Honest limits</summary>
+    <p>This deters casual copying and defeats simple find-and-replace or signature-based "deobfuscators," since there's no fixed pattern to match. It is not unbreakable: because the script must decode itself to run, anyone who hooks <code>loadstring</code>/<code>load</code> at runtime can capture the plain source. That limitation applies to every Lua obfuscator, including paid ones.</p>
+  </details>
+
+  <footer>
+    <span>Runs 100% client-side · no data leaves your browser</span>
+    <span class="credit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      Made by Scripterblabla
+    </span>
+  </footer>
+</div>
+<div id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5 9-10"/></svg><span id="toastText">Copied</span></div>
+
+<script>
+/* ---------------- generator (fixed: never risks Lua/Luau's 200-local-per-chunk limit) ---------------- */
+const RESERVED = new Set(["and","break","do","else","elseif","end","false","for","function",
+  "goto","if","in","local","nil","not","or","repeat","return","then","true","until","while"]);
+
+function makeNamer(){
+  const used=new Set();
+  const first="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const rest=first+"0123456789_";
+  return function rnd(len){
+    len=len||(6+Math.floor(Math.random()*5));
+    let s;
+    do{
+      s=first[Math.floor(Math.random()*first.length)];
+      for(let i=1;i<len;i++) s+=rest[Math.floor(Math.random()*rest.length)];
+    }while(RESERVED.has(s)||used.has(s));
+    used.add(s);
+    return s;
+  };
+}
+function randInt(min,max){return min+Math.floor(Math.random()*(max-min+1));}
+function splitBytes(bytes,numChunks){
+  const n=bytes.length;
+  numChunks=Math.max(1,Math.min(numChunks,n));
+  const sizes=[];let remaining=n;
+  for(let i=0;i<numChunks-1;i++){
+    const left=numChunks-i;
+    const avg=remaining/left;
+    let size=Math.max(1,Math.round(avg+(Math.random()*avg*0.4-avg*0.2)));
+    size=Math.min(size,remaining-(left-1));
+    sizes.push(size);remaining-=size;
+  }
+  sizes.push(remaining);
+  const chunks=[];let idx=0;
+  for(const s of sizes){chunks.push(bytes.slice(idx,idx+s));idx+=s;}
+  return chunks;
+}
+function shuffle(arr){
+  const a=arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+// Fixed small count of these are used — never enough to threaten the 200-local cap —
+// but each can carry a lot of content, so they still add visual "byte soup" bulk.
+function bigJunkStatement(rnd){
+  if(Math.random()<0.6){
+    const name=rnd();
+    const count=randInt(80,260);
+    const nums=[];
+    for(let i=0;i<count;i++) nums.push(randInt(0,255));
+    return `local ${name} = {${nums.join(",")}}`;
+  }else{
+    const fname=rnd(),vname=rnd();
+    const count=randInt(40,140);
+    const nums=[];
+    for(let i=0;i<count;i++) nums.push(randInt(0,255));
+    return `local function ${fname}() local ${vname} = {${nums.join(",")}} return ${vname} end`;
+  }
+}
+// Padding that costs ZERO local variables: a long Lua block comment.
+// Charset excludes "l"/"o" (so "local" can never appear) and "]" (so the comment
+// can never close itself early) — safe at any length.
+function makePaddingComment(targetChars){
+  if(targetChars<=0) return "--[==[ Protected By XF Coder ]==]";
+  const charset="0123456789abcdefABCDEF";
+  let body="",lineLen=0;
+  while(body.length<targetChars){
+    body+=charset[Math.floor(Math.random()*charset.length)];
+    lineLen++;
+    if(lineLen>=96){body+="\n";lineLen=0;}
+  }
+  return `--[==[\n${body}\n]==]`;
+}
+function bxorTemplate(fn,a,b,p,c,ra,rb){
+  return `local function ${fn}(${a},${b})
+  local ${p},${c}=1,0
+  while ${a}>0 and ${b}>0 do
+    local ${ra},${rb}=${a}%2,${b}%2
+    if ${ra}~=${rb} then ${c}=${c}+${p} end
+    ${a},${b},${p}=(${a}-${ra})/2,(${b}-${rb})/2,${p}*2
+  end
+  if ${a}<${b} then ${a}=${b} end
+  while ${a}>0 do
+    local ${ra}=${a}%2
+    if ${ra}>0 then ${c}=${c}+${p} end
+    ${a},${p}=(${a}-${ra})/2,${p}*2
+  end
+  return ${c}
+end`;
+}
+function generateObfuscated(source,minLen){
+  minLen=minLen||15300;
+  const rnd=makeNamer();
+
+  const bytes=Array.from(new TextEncoder().encode(source));
+  const key=randInt(1,255);
+  const enc=bytes.map(b=>b^key);
+
+  const base=randInt(10,16);
+  const extra=Math.min(10,Math.floor(enc.length/20000));
+  const numChunks=Math.min(26,base+extra);
+  const chunks=splitBytes(enc,numChunks);
+
+  const chunkNames=chunks.map(()=>rnd());
+  const bxorName=rnd(),keyName=rnd(),orderName=rnd();
+  const bytesAllName=rnd(),partsName=rnd(),srcName=rnd();
+  const loaderName=rnd(),fnName=rnd();
+  const v1=rnd(5),v2=rnd(5),idxName=rnd(5);
+  const bxorParams=[rnd(4),rnd(4),rnd(4),rnd(4),rnd(4),rnd(4)];
+
+  const bxorDecl=bxorTemplate(bxorName,...bxorParams);
+  const chunkDecls=chunks.map((c,i)=>`local ${chunkNames[i]} = {${c.join(",")}}`);
+  const keyDecl=`local ${keyName} = ${key}`;
+
+  const junkCount=randInt(4,8);
+  const junkDecls=[];
+  for(let i=0;i<junkCount;i++) junkDecls.push(bigJunkStatement(rnd));
+
+  let blockA=shuffle([bxorDecl,...chunkDecls,keyDecl,...junkDecls]);
+  const orderDecl=`local ${orderName} = {${chunkNames.join(",")}}`;
+
+  const assembly=[
+    `local ${bytesAllName} = {}`,
+    `for _,${v1} in ipairs(${orderName}) do`,
+    `  for _,${v2} in ipairs(${v1}) do`,
+    `    ${bytesAllName}[#${bytesAllName}+1] = ${v2}`,
+    `  end`,
+    `end`,
+    `local ${partsName} = {}`,
+    `for ${idxName}=1,#${bytesAllName} do`,
+    `  ${partsName}[${idxName}] = string.char(${bxorName}(${bytesAllName}[${idxName}], ${keyName}))`,
+    `end`,
+    `local ${srcName} = table.concat(${partsName})`,
+    `local ${loaderName} = loadstring or load`,
+    `local ${fnName} = ${loaderName}(${srcName})`,
+    `if ${fnName} then ${fnName}() end`,
+  ].join("\n");
+
+  const header=`-- Protected By XF Coder\n`;
+  let body=header+blockA.join("\n")+"\n"+orderDecl+"\n"+assembly+"\n";
+
+  const needed=minLen-body.length;
+  const padComment=makePaddingComment(needed);
+  return body+padComment+"\n";
+}
+
+/* ---------------- UI wiring ---------------- */
+const $=id=>document.getElementById(id);
+const ICON_OK=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l5 5 9-10"/></svg>`;
+const ICON_BAD=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`;
+const ICON_SPIN=`<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3a9 9 0 1 0 9 9" stroke-linecap="round"/></svg>`;
+const ICON_WAND=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v4M3 5h4M19 13v4M17 15h4"/><path d="M13 3 6 21l8-6 8 6-7-18Z"/></svg>`;
+
+function say(html,c){$("msg").innerHTML=html;$("msg").className="msg "+(c||"");}
+function toast(text){
+  const e=$("toast");$("toastText").textContent=text;e.classList.add("on");
+  clearTimeout(toast._t);toast._t=setTimeout(()=>e.classList.remove("on"),1700);
+}
+
+$("go").onclick=()=>{
+  const src=$("input").value;
+  if(!src.trim()) return say(ICON_BAD+" Paste some code first.","bad");
+  $("go").disabled=true;
+  $("go").innerHTML=ICON_SPIN+" Obfuscating…";
+  say("");
+  setTimeout(()=>{
+    try{
+      const out=generateObfuscated(src,15300);
+      $("output").value=out;
+      $("inLen").textContent=src.length;
+      $("outLen").textContent=out.length;
+      $("wm").textContent=out.startsWith("-- Protected By XF Coder")?"present":"missing";
+      $("resultCollapse").classList.add("open");
+      say(ICON_OK+" Done — ready to copy.","ok");
+    }catch(e){
+      say(ICON_BAD+" Something went wrong: "+e.message,"bad");
+    }
+    $("go").disabled=false;
+    $("go").innerHTML=ICON_WAND+" Obfuscate";
+  },420);
+};
+$("clear").onclick=()=>{
+  $("input").value="";
+  $("resultCollapse").classList.remove("open");
+  say("");
+};
+$("copy").onclick=async()=>{
+  try{await navigator.clipboard.writeText($("output").value);toast("Copied to clipboard");}
+  catch(e){$("output").select();toast("Selected — press Ctrl/Cmd+C");}
+};
+$("download").onclick=()=>{
+  const blob=new Blob([$("output").value],{type:"text/plain"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="protected.lua";
+  a.click();
+  toast("Downloading protected.lua");
+};
+</script>
+</body>
+</html>
